@@ -18089,6 +18089,57 @@ Current version indicated by LITEVER below.
 		is_impersonate_user = false;
 	});
 
+
+
+
+
+
+
+
+	function saveDynamicMemorySettings()
+	{
+		let win = document.getElementById("dynamic_memory_window").value;
+		let au = document.getElementById("dynamic_memory_auto_update").checked;
+		let stm = document.getElementById("short_term_memory").value;
+
+		// Save to localsettings so the built-in save/load functions include it
+		localsettings.dynamic_memory_window = parseInt(win);
+		localsettings.dynamic_memory_auto_update = au;
+		localsettings.short_term_memory = stm;
+
+		// Optional: persist immediately to Browser Storage
+		indexeddb_save("dynamic_memory_window", win);
+		indexeddb_save("dynamic_memory_auto_update", au ? "1" : "0");
+		indexeddb_save("short_term_memory", stm);
+	}
+	async function loadDynamicMemorySettings() 
+	{
+		let win = await indexeddb_load("dynamic_memory_window", "512");
+		let au  = await indexeddb_load("dynamic_memory_auto_update", "1");
+		let stm = await indexeddb_load("short_term_memory", "");
+
+		document.getElementById("dynamic_memory_window").value = win;
+		document.getElementById("dynamic_memory_window_slide").value = win;
+		document.getElementById("dynamic_memory_auto_update").checked = (au == "1");
+		document.getElementById("short_term_memory").value = stm;
+
+		// re-apply into localsettings (important for save/share/story export)
+		localsettings.dynamic_memory_window = parseInt(win);
+		localsettings.dynamic_memory_auto_update = (au == "1");
+		localsettings.short_term_memory = stm;
+	}
+
+
+
+
+
+
+
+
+
+
+
+
 	function get_stop_sequences() //the input object may not always be the same!
 	{
 		let seqs = [];
@@ -23688,33 +23739,46 @@ Current version indicated by LITEVER below.
 
 	var memory_tab = 0;
 	function display_memory_tab(newtab)
-	{
-		memory_tab = newtab;
-		document.getElementById("memory_tab").classList.remove("active");
-		document.getElementById("wi_tab").classList.remove("active");
-		document.getElementById("documentdb_tab").classList.remove("active");
-		document.getElementById("memory_tab_container").classList.add("hidden");
-		document.getElementById("wi_tab_container").classList.add("hidden");
-		document.getElementById("documentdb_tab_container").classList.add("hidden");
+{
+    memory_tab = newtab;
 
-		switch (newtab) {
-			case 0:
-				document.getElementById("memory_tab").classList.add("active");
-				document.getElementById("memory_tab_container").classList.remove("hidden");
-				break;
-			case 1:
-				document.getElementById("wi_tab").classList.add("active");
-				document.getElementById("wi_tab_container").classList.remove("hidden");
-				break;
-			case 2:
-				document.getElementById("documentdb_tab").classList.add("active");
-				document.getElementById("documentdb_tab_container").classList.remove("hidden");
-				estimate_and_show_textDB_usage();
-				break;
-			default:
-				break;
-		}
-	}
+    document.getElementById("memory_tab").classList.remove("active");
+    document.getElementById("wi_tab").classList.remove("active");
+    document.getElementById("documentdb_tab").classList.remove("active");
+    document.getElementById("dynamic_memory_tab").classList.remove("active");
+
+    document.getElementById("memory_tab_container").classList.add("hidden");
+    document.getElementById("wi_tab_container").classList.add("hidden");
+    document.getElementById("documentdb_tab_container").classList.add("hidden");
+    document.getElementById("dynamic_memory_tab_container").classList.add("hidden");
+
+    switch (newtab) {
+        case 0:
+            document.getElementById("memory_tab").classList.add("active");
+            document.getElementById("memory_tab_container").classList.remove("hidden");
+            break;
+
+        case 1:
+            document.getElementById("wi_tab").classList.add("active");
+            document.getElementById("wi_tab_container").classList.remove("hidden");
+            break;
+
+        case 2:
+            document.getElementById("documentdb_tab").classList.add("active");
+            document.getElementById("documentdb_tab_container").classList.remove("hidden");
+            estimate_and_show_textDB_usage();
+            break;
+
+        case 3:
+            document.getElementById("dynamic_memory_tab").classList.add("active");
+            document.getElementById("dynamic_memory_tab_container").classList.remove("hidden");
+            break;
+
+        default:
+            break;
+    }
+}
+
 
 	function btn_memory() {
 		mainmenu_untab(true);
@@ -23740,6 +23804,7 @@ Current version indicated by LITEVER below.
 		document.getElementById("documentdb_numresults_slide").value = documentdb_numresults
 		document.getElementById("documentdb_searchrange_slide").value = documentdb_searchrange;
 		document.getElementById("documentdb_chunksize_slide").value = documentdb_chunksize;
+		loadDynamicMemorySettings();
 		document.getElementById("documentdb_data").value = documentdb_data;
 		let providerdropdown = document.getElementById("documentdb_provider");
 		const kcppEmbeddingDropdownOption = Array.from(providerdropdown.options).find(opt => opt.value === "2");
@@ -26228,6 +26293,7 @@ Current version indicated by LITEVER below.
 				<li id="memory_tab" class="active"><a class="" href="#" onclick="display_memory_tab(0)">Memory</a></li>
 				<li id="wi_tab"><a class="" href="#" onclick="display_memory_tab(1)">World Info</a></li>
 				<li id="documentdb_tab"><a class="" href="#" onclick="display_memory_tab(2)">TextDB</a></li>
+    				<li id="dynamic_memory_tab"><a class="" href="#" onclick="display_memory_tab(3)">Dynamic Memory</a></li>
 			</ul></div>
 
 			<div class="context_tab_container" id="memory_tab_container">
@@ -26425,6 +26491,94 @@ Current version indicated by LITEVER below.
 				<textarea title="Edit TextDB" class="form-control menuinput_multiline" oninput="estimate_and_show_textDB_usage()" id="documentdb_data" style="height: 120px;"
 					placeholder="Paste as much text data here as you like. This text will populate the database that will be searched by TextDB. This can be split using [DOCUMENT BREAK] to split the overall database into smaller documents, and titles can be added with [DOCUMENT BREAK][Title of document]This is the content of the document."></textarea>
 			</div>
+
+
+
+
+
+
+					<div class="context_tab_container hidden" id="dynamic_memory_tab_container">
+			<div class="settinglabel">
+				<span class="justifyleft">Dynamic Memory<span class="helpicon">?<span
+					class="helptext">Short-term memory, it summarizes old conversation tokens into a smaller, simplified paragraph.</span></span>
+				</span>
+				<span class="justifyright flex-push-right">
+					<button type="button" class="btn btn-primary" style="font-size:10px;padding:2px 5px;margin:2px;" onclick="dynamic_memory_update()">Update Now</button>
+				</span>
+			</div>
+			
+			<!-- Memory Window Size Input -->
+			<div class="settingitem">
+				<div class="settinglabel" style="padding: 4px; margin-top: 8px;">
+					<div class="justifyleft settingsmall" style="width: 150px;">Immediate Memory Size <span class="helpicon">?<span
+						class="helptext">Number of recent tokens to inject into prompt (tokens older than them, get summarized into short-term memory instead)</span></span></div>
+					<div style="display: flex; align-items: center; gap: 8px;">
+						<input title="Immediate Memory Size" 
+							inputmode="numeric" 
+							class="form-control menuinput_inline" 
+							id="dynamic_memory_window" 
+							type="number" 
+							min="512" 
+							max="8192" 
+							value="512" 
+							style="width: 80px; height: 26px;"
+							onchange="saveDynamicMemorySettings()">
+						<div class="settingsmall" style="color: #666;">messages</div>
+					</div>
+				</div>
+				
+				<!-- Slider for Memory Window -->
+				<div style="margin: 0 4px 8px 4px;">
+					<input title="Immediate Memory Size Slider" 
+						type="range" 
+						min="512" 
+						max="8192" 
+						step="1" 
+						id="dynamic_memory_window_slide" 
+						value="512"
+						style="width: 100%;"
+						oninput="document.getElementById('dynamic_memory_window').value = this.value; saveDynamicMemorySettings()">
+					<div class="settingminmax" style="margin-top: 2px;">
+						<div class="justifyleft">1</div>
+						<div class="justifyright">50</div>
+					</div>
+				</div>
+			</div>
+			
+			<!-- Short-Term Memory Text Area -->
+			<div class="settinglabel" style="margin-top: 16px; margin-bottom: 8px;">
+				<span class="justifyleft" style="font-weight: bold; font-size: 14px;">Short-Term Memory</span>
+				<span class="justifyright flex-push-right">
+					<div class="settinglabel" style="padding: 0; margin: 0;">
+						<div class="justifyleft settingsmall" title="Auto-update short-term memory with new context">Auto-update </div>
+						<input title="Auto-update Short-Term Memory" 
+							type="checkbox" 
+							id="dynamic_memory_auto_update" 
+							style="margin: 0 0 0 4px;"
+							checked
+							onchange="saveDynamicMemorySettings()">
+					</div>
+				</span>
+			</div>
+			
+			<!-- Large Text Area for Short-Term Memory -->
+			<textarea title="Short-Term Memory" 
+					class="form-control menuinput_multiline" 
+					id="short_term_memory" 
+					style="height: 400px; font-size: 13px; line-height: 1.4;"
+					placeholder="Short-Term memory is summarization of tokens before Immediate Memory, it gets automatically updated after tokens generated exceed the value of Immediate Memory Size. You can also edit this manually anytime."
+					onchange="saveDynamicMemorySettings()"></textarea>
+		</div>
+
+
+
+
+
+
+
+
+
+
 			<div id="memorycontainerfooter" class="popupfooter">
 				<button type="button" class="btn btn-primary" onclick="confirm_memory();save_wi();commit_wi_changes();render_gametext();sync_multiplayer(true);hide_popups()">OK</button>
 				<button type="button" class="btn btn-primary" onclick="hide_popups();">Cancel</button>

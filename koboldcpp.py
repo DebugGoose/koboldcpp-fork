@@ -1504,6 +1504,105 @@ def load_model(model_filename):
     ret = handle.load_model(inputs)
     return ret
 
+
+
+
+
+
+
+
+def generate_summary_of_old_context(full_context, immediate_max_tokens=512):
+    """Generate a summary of everything before the last N immediate tokens."""
+    if not full_context or len(full_context.strip()) == 0:
+        return ""
+    
+    # Tokenize the full context
+    all_tokens = tokenize_ids(full_context, False)
+    
+    if len(all_tokens) <= immediate_max_tokens:
+        # Not enough tokens to summarize
+        return ""
+    
+    # Split tokens: old context (to summarize) vs immediate context (to keep)
+    old_context_tokens = all_tokens[:-immediate_max_tokens]
+    
+    # Convert old context tokens back to text for summarization
+    old_context_text = detokenize_ids(old_context_tokens)
+    
+    # Create summary prompt - keep it simple
+    summary_prompt = f"{old_context_text}\n\nSummarize the key points of the conversation above in one concise paragraph:"
+    
+    # Generate the summary
+    summary_params = {
+        "prompt": summary_prompt,
+        "max_length": 1024,  # Short summary
+        "temperature": 0.3,  # Low temperature for factual summary
+        "top_p": 0.9,
+        "rep_pen": 1.0,
+        "stop_sequence": ["\n\n"],
+        "trim_stop": True
+    }
+    
+    try:
+        summary_result = generate(genparams=summary_params, stream_flag=False)
+        summary_text = summary_result.get('text', '').strip()
+        return summary_text
+    except Exception as e:
+        if args.debugmode:
+            print(f"Summary generation failed: {e}")
+        return ""
+
+
+
+
+
+
+
+def truncate_to_last_n_tokens(text, max_tokens=1024, preserve_last_line_as_prompt=True):
+    """Truncate text to last N tokens, optionally preserving last line as prompt."""
+    if not text:
+        return "", ""
+    
+    # Tokenize the entire text
+    tokens = tokenize_ids(text, False)
+    
+    if len(tokens) <= max_tokens:
+        # If within limit, split memory/prompt by last newline
+        if preserve_last_line_as_prompt and '\n' in text:
+            parts = text.rsplit('\n', 1)
+            return parts[0], parts[1]
+        return "", text
+    
+    # Keep only last N tokens
+    tokens_to_keep = tokens[-max_tokens:]
+    
+    # Detokenize
+    truncated_text = detokenize_ids(tokens_to_keep)
+    
+    # Split into memory and prompt
+    if preserve_last_line_as_prompt and '\n' in truncated_text:
+        # Find the last newline that gives us a reasonable split
+        lines = truncated_text.split('\n')
+        # Ensure prompt has at least some content
+        if lines[-1].strip():
+            memory = '\n'.join(lines[:-1])
+            prompt = lines[-1]
+        else:
+            # If last line is empty, take the one before
+            memory = '\n'.join(lines[:-2]) if len(lines) > 2 else ""
+            prompt = lines[-2] if len(lines) > 1 else truncated_text
+    else:
+        # No good split point, use all as prompt
+        memory = ""
+        prompt = truncated_text
+    
+    return memory, prompt
+
+
+
+
+
+
 def generate(genparams, stream_flag=False):
     global maxctx, args, currentusergenkey, totalgens, pendingabortkey
     default_adapter = {} if chatcompl_adapter is None else chatcompl_adapter
@@ -1511,6 +1610,61 @@ def generate(genparams, stream_flag=False):
 
     prompt = genparams.get('prompt', "")
     memory = genparams.get('memory', "")
+    
+    MMEDIATE_TOKENS = 768  # Always keep last 768 tokens in prompt
+    SUMMARIZE_THRESHOLD = 2048  # Summarize when total > 2048 tokens
+    
+    if savedata_obj and 'story' in savedata_obj:
+        full_story = savedata_obj['story']
+        story_tokens = len(tokenize_ids(full_story, False))
+        
+        # Get last N tokens from full story
+        if story_tokens > IMMEDIATE_TOKENS:
+            last_tokens = tokenize_ids(full_story, False)[-IMMEDIATE_TOKENS:]
+            immediate_text = detokenize_ids(last_tokens)
+            
+            # Clean up the immediate text if it's cut mid-sentence
+            immediate_text = clean_cut_text(immediate_text)
+            
+            # Replace the prompt with immediate text
+            # (Keeps memory as-is or empty)
+            prompt = immediate_text
+            memory = ""  # Or keep existing memory if you prefer
+            
+            # Update genparams
+            genparams['prompt'] = prompt
+            genparams['memory'] = memory
+            
+            if args.debugmode:
+                print(f"Injected last {IMMEDIATE_TOKENS} tokens into prompt")
+        
+        # === AUTO-SUMMARIZE OLD CONTEXT ===
+        if story_tokens > SUMMARIZE_THRESHOLD:
+            # Generate summary of everything BEFORE immediate tokens
+            summary = generate_summary_of_old_context(full_story, IMMEDIATE_TOKENS)
+            
+            if summary and summary.strip():
+                # Update Author's Note with summary
+                current_an = savedata_obj.get('authorsnote', '')
+                
+                # Clean up old summaries
+                if "[Summary]" in current_an:
+                    # Remove between [Summary] and [End Summary]
+                    import re
+                    current_an = re.sub(r'\[Summary\].*?\[End Summary\]', '', current_an, flags=re.DOTALL).strip()
+                
+                # Add new summary
+                if current_an:
+                    savedata_obj['authorsnote'] = f"{current_an}\n\n[Summary]\n{summary}\n[End Summary]"
+                else:
+                    savedata_obj['authorsnote'] = f"[Summary]\n{summary}\n[End Summary]"
+                
+                if args.debugmode:
+                    print(f"Auto-generated summary added to Author's Note")
+
+
+
+
     negative_prompt = genparams.get('negative_prompt', "")
     guidance_scale = tryparsefloat(genparams.get('guidance_scale', 1.0),1.0)
     images = genparams.get('images', [])
